@@ -4,10 +4,9 @@ html, body {
   overflow: hidden;
 }
 h1 {
-font-size: 0.26rem;
+font-size: 0.8rem;
 }
 #root {
-
 margin: 0.26rem;
 padding: 0.8rem;
 opacity: 0;
