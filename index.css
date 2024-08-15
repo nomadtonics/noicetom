@@ -1,7 +1,16 @@
 html, body {
     background-color: #001928;
     color: #abcdef;
+    overflow: hidden;
 }
 h1 {
   font-size: 0.8rem;
+}
+root {
+
+  margin: 0.8rem;
+  padding: 0.8rem;
+  opacity: 0;
+  border: solid #abcdef;
+  border-radius: 8%;
 }
