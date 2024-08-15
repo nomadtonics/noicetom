@@ -1,0 +1,7 @@
+html, body {
+    background-color: #001928;
+    color: #abcdef;
+}
+h1, #main-heading {
+  font-size: 250px;
+}
