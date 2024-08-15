@@ -3,9 +3,6 @@ html, body {
   color: #abcdef;
   overflow: hidden;
 }
-h1 {
-font-size: 8rem;
-}
 #root {
 margin: 0.26rem;
 padding: 0.8rem;
