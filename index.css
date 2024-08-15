@@ -1,12 +1,11 @@
-html, body {
+
+#root {
   background-color: #001928;
   color: #abcdef;
   overflow: hidden;
-}
-#root {
-margin: 0.26rem;
-padding: 0.8rem;
-opacity: 0;
-border: solid #abcdef;
-border-radius: 8%;
+  margin: 0.26rem;
+  padding: 0.8rem;
+  opacity: 0;
+  border: solid #abcdef;
+  border-radius: 8%;
 }
