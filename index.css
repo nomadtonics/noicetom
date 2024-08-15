@@ -6,7 +6,7 @@ html, body {
 h1 {
 font-size: 0.26rem;
 }
-root {
+#root {
 
 margin: 0.26rem;
 padding: 0.8rem;
