@@ -1,0 +1,21 @@
+[package]
+name = "noicetom"
+version = "0.1.0"
+edition = "2021"
+description = "Real-time chat API service for noicetom"
+license = "MIT"
+
+[dependencies]
+axum = { version = "0.7", features = ["macros"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "signal", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+uuid = { version = "1.9", features = ["serde", "v4"] }
+
+[dev-dependencies]
+hyper = { version = "1.0", features = ["client", "http1"] }
