@@ -1,0 +1,69 @@
+# noicetom
+
+A full-stack Rust chat application with:
+- Axum backend API + WebSocket chat service
+- Dioxus web frontend
+- PostgreSQL persistence
+- Docker support for local development and Render deployment
+
+## Stack
+
+- Backend: Rust + Axum
+- Frontend: Dioxus + Trunk + Nginx
+- Database: PostgreSQL
+- Runtime: Docker / Render
+
+## Local development
+
+```bash
+docker compose up --build
+```
+
+Then open:
+- Frontend: http://localhost:8080
+- Backend API: http://localhost:3000
+- WebSocket: ws://localhost:8080/ws
+
+## Environment variables
+
+Backend:
+
+```bash
+PORT=3000
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/noicetom
+```
+
+## Render deployment
+
+1. Push this repository to GitHub.
+2. Create a new Render Blueprint project from the repository.
+3. Render will read `render.yaml` and create:
+   - `noicetom-backend` Docker web service
+   - `noicetom-frontend` Docker web service
+   - `noicetom-db` managed PostgreSQL database
+4. The backend automatically gets `DATABASE_URL` from the database service.
+5. The frontend is configured to proxy `/api` and `/ws` requests to the backend service via Nginx.
+
+## SQL migration
+
+The database migration creates the `messages` table:
+
+```sql
+CREATE TABLE IF NOT EXISTS messages (
+    id VARCHAR(64) PRIMARY KEY,
+    sender VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+## Health checks
+
+```bash
+curl http://localhost:3000/api/health
+```
+
+## Notes
+
+- The app uses the same-origin frontend proxy pattern so the browser can call the backend through `/api` and `/ws`.
+- For a production deployment, you can replace the local generated wire format with authenticated user sessions and persistent chat rooms.
