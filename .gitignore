@@ -1,6 +1,7 @@
-target/
-Cargo.lock
-.env
-.env.*
 .DS_Store
-node_modules/
+/target
+/data
+/node_modules
+pkg/
+*.sqlite
+.env

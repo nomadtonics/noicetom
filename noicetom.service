@@ -1,0 +1,14 @@
+[Unit]
+Description=noicetom service
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/noicetom
+ExecStart=/opt/noicetom/noicetom
+Environment=RUST_LOG=info
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
