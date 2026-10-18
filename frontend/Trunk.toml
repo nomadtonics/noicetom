@@ -1,6 +1,0 @@
-[build]
-# use trunk to build the wasm app
-target = "wasm32-unknown-unknown"
-
-[serve]
-port = 8080

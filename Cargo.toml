@@ -3,6 +3,7 @@ name = "noicetom"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+anyhow = "1.0"
 
 [lib]
 name = "noicetom"

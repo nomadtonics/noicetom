@@ -1,9 +1,0 @@
-target/
-.git/
-.gitignore
-node_modules/
-Dockerfile*
-.dockerignore
-**/dist/
-**/.git/
-**/.DS_Store
