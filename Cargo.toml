@@ -6,7 +6,6 @@ resolver = "2"
 name = "noicetom"
 version = "0.1.0"
 edition = "2021"
-description = "Rust backend and desktop app for noicetom"
 license = "MIT"
 
 [lib]
@@ -25,13 +24,12 @@ serde_json = "1.0"
 tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "signal", "net"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.5", features = ["trace", "cors"] }
 uuid = { version = "1.9", features = ["serde", "v4"] }
-futures-util = "0.3"
+rand = "0.8"
 dirs = "5"
 aes-gcm = "0.10"
-rand = "0.8"
+base64 = "0.21"
+tower-http = { version = "0.5", features = ["trace", "cors"] }
 
 [dev-dependencies]
 hyper = { version = "1.0", features = ["client", "http1"] }
