@@ -1,4 +1,4 @@
-use aes_gcm::{aead::Aead, Aes256Gcm, Key, KeyInit as _, Nonce};
+use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit as _, Nonce};
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose, Engine as _};
 use rand::rngs::OsRng;
@@ -69,34 +69,38 @@ impl Storage {
         }
 
         let nonce = Nonce::from_slice(&raw[..12]);
-        let cipher = Aes256Gcm::new(Key::from_slice(&self.key));
-        let plaintext = cipher
-            .decrypt(nonce, &raw[12..])
-            .map_err(|e| anyhow!(e.to_string()))?;
-        let messages: Vec<Message> = serde_json::from_slice(&plaintext)?;
-        Ok(messages)
-    }
-
-    pub fn save_messages(&self, messages: &[Message]) -> Result<()> {
-        let plaintext = serde_json::to_vec(messages)?;
-        let cipher = Aes256Gcm::new(Key::from_slice(&self.key));
-        let mut nonce = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce);
-        let ciphertext = cipher
-            .encrypt(Nonce::from_slice(&nonce), plaintext.as_ref())
-            .map_err(|e| anyhow!(e.to_string()))?;
-
-        let mut out = Vec::with_capacity(12 + ciphertext.len());
-        out.extend_from_slice(&nonce);
-        out.extend_from_slice(&ciphertext);
-        fs::write(&self.path, out)?;
-        Ok(())
-    }
-
-    pub fn append_message(&self, message: &Message) -> Result<()> {
-        let mut messages = self.load_messages()?;
-        messages.push(message.clone());
-        self.save_messages(&messages)?;
-        Ok(())
-    }
-}
+-        let cipher = Aes256Gcm::new(Key::from_slice(&self.key));
++        let cipher = Aes256Gcm::new_from_slice(&self.key)
++            .map_err(|e| anyhow!(e.to_string()))?;
+         let plaintext = cipher
+             .decrypt(nonce, &raw[12..])
+             .map_err(|e| anyhow!(e.to_string()))?;
+         let messages: Vec<Message> = serde_json::from_slice(&plaintext)?;
+         Ok(messages)
+     }
+ 
+     pub fn save_messages(&self, messages: &[Message]) -> Result<()> {
+         let plaintext = serde_json::to_vec(messages)?;
+-        let cipher = Aes256Gcm::new(Key::from_slice(&self.key));
++        let cipher = Aes256Gcm::new_from_slice(&self.key)
++            .map_err(|e| anyhow!(e.to_string()))?;
+         let mut nonce = [0u8; 12];
+         OsRng.fill_bytes(&mut nonce);
+         let ciphertext = cipher
+             .encrypt(Nonce::from_slice(&nonce), plaintext.as_ref())
+             .map_err(|e| anyhow!(e.to_string()))?;
+ 
+         let mut out = Vec::with_capacity(12 + ciphertext.len());
+         out.extend_from_slice(&nonce);
+         out.extend_from_slice(&ciphertext);
+         fs::write(&self.path, out)?;
+         Ok(())
+     }
+ 
+     pub fn append_message(&self, message: &Message) -> Result<()> {
+         let mut messages = self.load_messages()?;
+         messages.push(message.clone());
+         self.save_messages(&messages)?;
+         Ok(())
+     }
+ }
