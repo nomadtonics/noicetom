@@ -15,9 +15,14 @@ use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
+use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
+use futures_util::{SinkExt, StreamExt};
+use tokio::sync::broadcast;
+
 #[derive(Clone, Debug)]
 struct AppState {
     messages: Arc<RwLock<Vec<Message>>>,
+    broadcaster: broadcast::Sender<Message>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -77,7 +82,8 @@ async fn root() -> Json<serde_json::Value> {
             "/health",
             "/api/health",
             "/api/version",
-            "/api/messages"
+            "/api/messages",
+            "/ws"
         ]
     }))
 }
@@ -122,15 +128,85 @@ async fn create_message(
         created_at: Utc::now().to_rfc3339(),
     };
 
-    let mut messages = state.messages.write().unwrap();
-    messages.push(message.clone());
+    {
+        let mut messages = state.messages.write().unwrap();
+        messages.push(message.clone());
+    }
+
+    // broadcast to websocket clients
+    let _ = state.broadcaster.send(message.clone());
 
     Ok(Json(message))
 }
 
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
+    ws.on_upgrade(|socket| handle_socket(socket, state))
+}
+
+async fn handle_socket(mut socket: WebSocket, state: AppState) {
+    // send existing history first
+    let history = { state.messages.read().unwrap().clone() };
+
+    for m in history {
+        if socket.send(WsMessage::Text(serde_json::to_string(&m).unwrap())).await.is_err() {
+            return;
+        }
+    }
+
+    let mut rx = state.broadcaster.subscribe();
+
+    // Split the socket into sink and stream
+    let (mut sender, mut receiver) = socket.split();
+
+    // task to forward broadcast messages to this socket
+    let mut rx2 = rx.resubscribe();
+    let mut send_task = tokio::spawn(async move {
+        while let Ok(msg) = rx2.recv().await {
+            let txt = serde_json::to_string(&msg).unwrap();
+            if sender.send(WsMessage::Text(txt)).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // receive messages from client
+    while let Some(Ok(msg)) = receiver.next().await {
+        match msg {
+            WsMessage::Text(text) => {
+                // try parse as CreateMessageRequest
+                if let Ok(payload) = serde_json::from_str::<CreateMessageRequest>(&text) {
+                    let message = Message {
+                        id: Uuid::new_v4().to_string(),
+                        sender: payload.sender.trim().to_string(),
+                        content: payload.content.trim().to_string(),
+                        created_at: Utc::now().to_rfc3339(),
+                    };
+
+                    {
+                        let mut messages = state.messages.write().unwrap();
+                        messages.push(message.clone());
+                    }
+
+                    // broadcast to all other clients
+                    let _ = state.broadcaster.send(message);
+                }
+            }
+            WsMessage::Close(_) => break,
+            WsMessage::Ping(_) | WsMessage::Pong(_) | WsMessage::Binary(_) => {}
+        }
+    }
+
+    // cleanup
+    send_task.abort();
+}
+
 fn app() -> Router {
+    let messages = Arc::new(RwLock::new(Vec::new()));
+    let (tx, _rx) = broadcast::channel(100);
+
     let state = AppState {
-        messages: Arc::new(RwLock::new(Vec::new())),
+        messages,
+        broadcaster: tx,
     };
 
     Router::new()
@@ -139,6 +215,7 @@ fn app() -> Router {
         .route("/api/health", get(health))
         .route("/api/version", get(version))
         .route("/api/messages", get(list_messages).post(create_message))
+        .route("/ws", get(ws_handler))
         .with_state(state)
         .layer(TraceLayer::new_for_http())
 }
