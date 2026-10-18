@@ -1,9 +1,21 @@
+[workspace]
+members = ["desktop"]
+resolver = "2"
+
 [package]
 name = "noicetom"
 version = "0.1.0"
 edition = "2021"
-description = "Real-time chat API service for noicetom"
+description = "Rust backend and desktop app for noicetom"
 license = "MIT"
+
+[lib]
+name = "noicetom"
+path = "src/lib.rs"
+
+[[bin]]
+name = "noicetom"
+path = "src/main.rs"
 
 [dependencies]
 axum = { version = "0.7", features = ["macros"] }
@@ -17,7 +29,9 @@ tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.5", features = ["trace", "cors"] }
 uuid = { version = "1.9", features = ["serde", "v4"] }
 futures-util = "0.3"
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "migrate"] }
+dirs = "5"
+aes-gcm = "0.10"
+rand = "0.8"
 
 [dev-dependencies]
 hyper = { version = "1.0", features = ["client", "http1"] }
