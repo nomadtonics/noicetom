@@ -16,46 +16,107 @@ impl Db {
     }
 
     pub fn init(&self) -> Result<()> {
-        self.conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                public_key TEXT NOT NULL,
-                created_at INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS messages (
-                id TEXT PRIMARY KEY,
-                sender_username TEXT NOT NULL,
-                recipient_username TEXT NOT NULL,
-                enc_key TEXT NOT NULL,
-                ciphertext TEXT NOT NULL,
-                nonce TEXT NOT NULL,
-                alg TEXT,
-                version TEXT,
-                created_at INTEGER NOT NULL,
-                delivered INTEGER DEFAULT 0,
-                read INTEGER DEFAULT 0
-            );
-            "#,
-        )?;
+        let has_users = self
+            .conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+
+        if has_users.is_none() {
+            self.conn.execute_batch(
+                r#"
+                CREATE TABLE users (
+                    id TEXT PRIMARY KEY,
+                    username TEXT UNIQUE NOT NULL,
+                    signing_pub TEXT NOT NULL,
+                    enc_pub TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                );
+                CREATE TABLE messages (
+                    id TEXT PRIMARY KEY,
+                    sender_username TEXT NOT NULL,
+                    recipient_username TEXT NOT NULL,
+                    enc_key TEXT NOT NULL,
+                    ciphertext TEXT NOT NULL,
+                    nonce TEXT NOT NULL,
+                    alg TEXT,
+                    version TEXT,
+                    created_at INTEGER NOT NULL,
+                    delivered INTEGER DEFAULT 0,
+                    read INTEGER DEFAULT 0
+                );
+                "#,
+            )?;
+            return Ok(());
+        }
+
+        let mut stmt = self.conn.prepare("PRAGMA table_info(users)")?;
+        let columns: Vec<String> = stmt
+            .query_map([], |row| row.get(1))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        if !columns.iter().any(|c| c == "signing_pub") {
+            self.conn.execute("ALTER TABLE users ADD COLUMN signing_pub TEXT", [])?;
+        }
+        if !columns.iter().any(|c| c == "enc_pub") {
+            self.conn.execute("ALTER TABLE users ADD COLUMN enc_pub TEXT", [])?;
+        }
+
+        if columns.iter().any(|c| c == "public_key") {
+            self.conn.execute(
+                "UPDATE users SET signing_pub = public_key WHERE signing_pub IS NULL OR signing_pub = ''",
+                [],
+            )?;
+            self.conn.execute(
+                "UPDATE users SET enc_pub = public_key WHERE enc_pub IS NULL OR enc_pub = ''",
+                [],
+            )?;
+        }
+
         Ok(())
     }
 
-    pub fn insert_user(&self, username: &str, public_key_b64: &str) -> Result<()> {
+    pub fn insert_user(&self, username: &str, signing_pub_b64: &str, enc_pub_b64: &str) -> Result<()> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().timestamp();
         self.conn.execute(
-            "INSERT INTO users (id, username, public_key, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params![id, username, public_key_b64, now],
+            "INSERT INTO users (id, username, signing_pub, enc_pub, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, username, signing_pub_b64, enc_pub_b64, now],
         )?;
         Ok(())
     }
 
     pub fn get_public_key(&self, username: &str) -> Result<String> {
-        let mut stmt = self.conn.prepare("SELECT public_key FROM users WHERE username = ?1")?;
+        self.get_signing_pub(username)
+    }
+
+    pub fn get_signing_pub(&self, username: &str) -> Result<String> {
+        let mut stmt = self.conn.prepare("SELECT signing_pub FROM users WHERE username = ?1")?;
         let pk: Option<String> = stmt.query_row(params![username], |row| row.get(0)).optional()?;
-        pk.ok_or_else(|| anyhow::anyhow!("not found"))
+        match pk {
+            Some(pk) => Ok(pk),
+            None => {
+                let mut legacy = self.conn.prepare("SELECT public_key FROM users WHERE username = ?1")?;
+                let legacy_pk: Option<String> = legacy.query_row(params![username], |row| row.get(0)).optional()?;
+                legacy_pk.ok_or_else(|| anyhow::anyhow!("not found"))
+            }
+        }
+    }
+
+    pub fn get_enc_pub(&self, username: &str) -> Result<String> {
+        let mut stmt = self.conn.prepare("SELECT enc_pub FROM users WHERE username = ?1")?;
+        let pk: Option<String> = stmt.query_row(params![username], |row| row.get(0)).optional()?;
+        match pk {
+            Some(pk) => Ok(pk),
+            None => {
+                let mut legacy = self.conn.prepare("SELECT public_key FROM users WHERE username = ?1")?;
+                let legacy_pk: Option<String> = legacy.query_row(params![username], |row| row.get(0)).optional()?;
+                legacy_pk.ok_or_else(|| anyhow::anyhow!("not found"))
+            }
+        }
     }
 
     pub fn insert_message(&self, sender: &str, recipient: &str, enc_key_b64: &str, ciphertext_b64: &str, nonce_b64: &str, alg: &str, version: &str) -> Result<()> {
