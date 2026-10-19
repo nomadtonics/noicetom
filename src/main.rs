@@ -7,6 +7,7 @@ use axum::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::Mutex;
 use tracing_subscriber;
@@ -16,7 +17,6 @@ mod models;
 mod auth;
 
 use db::Db;
-use models::*;
 use auth::AuthManager;
 
 #[derive(Clone)]
@@ -59,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn health() -> Json<serde_json::Value> {
+async fn health() -> Json<Value> {
     Json(serde_json::json!({ "ok": true }))
 }
 
@@ -70,7 +70,7 @@ struct RegisterRequest {
     enc_pub_b64: String,
 }
 
-async fn register(State(state): State<AppState>, Json(req): Json<RegisterRequest>) -> impl IntoResponse {
+async fn register(State(state): State<AppState>, Json(req): Json<RegisterRequest>) -> (StatusCode, Json<Value>) {
     // validate base64 and key lengths (Ed25519 & X25519 are 32 bytes)
     let signing_bytes = match general_purpose::STANDARD.decode(&req.signing_pub_b64) {
         Ok(b) => b,
@@ -100,7 +100,7 @@ struct ChallengeRequest {
     username: String,
 }
 
-async fn challenge(State(state): State<AppState>, Json(req): Json<ChallengeRequest>) -> impl IntoResponse {
+async fn challenge(State(state): State<AppState>, Json(req): Json<ChallengeRequest>) -> (StatusCode, Json<Value>) {
     let ch = state.auth.issue_challenge(&req.username).await;
     (StatusCode::OK, Json(serde_json::json!({ "challenge": general_purpose::STANDARD.encode(ch) })))
 }
@@ -111,18 +111,31 @@ struct VerifyRequest {
     signature_b64: String,
 }
 
-async fn verify(State(state): State<AppState>, Json(req): Json<VerifyRequest>) -> impl IntoResponse {
+async fn verify(State(state): State<AppState>, Json(req): Json<VerifyRequest>) -> (StatusCode, Json<Value>) {
     match state.auth.verify_and_issue(&req.username, &req.signature_b64, &state.db).await {
         Ok(token) => (StatusCode::OK, Json(serde_json::json!({ "token": token }))),
-        Err(e) => (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": e.to_string() }))),
+        Err(e) => {
+            tracing::warn!(username = %req.username, "auth verify failed: {}", e);
+            (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": e.to_string() })))
+        }
     }
 }
 
-async fn get_key(State(state): State<AppState>, Path(username): Path<String>) -> impl IntoResponse {
+async fn get_key(State(state): State<AppState>, Path(username): Path<String>) -> (StatusCode, Json<Value>) {
     let db_guard = state.db.clone();
     let db = db_guard.lock().await;
     match db.get_enc_pub(&username) {
-        Ok(pk) => (StatusCode::OK, Json(serde_json::json!({ "enc_pub_b64": pk }))),
+        Ok(pk_b64) => {
+            // compute SHA256 fingerprint of the decoded key, return base64 fingerprint
+            if let Ok(pk_bytes) = general_purpose::STANDARD.decode(&pk_b64) {
+                use sha2::{Digest, Sha256};
+                let fp = Sha256::digest(&pk_bytes);
+                let fp_b64 = general_purpose::STANDARD.encode(fp);
+                (StatusCode::OK, Json(serde_json::json!({ "enc_pub_b64": pk_b64, "fingerprint_b64": fp_b64 })))
+            } else {
+                (StatusCode::OK, Json(serde_json::json!({ "enc_pub_b64": pk_b64, "fingerprint_b64": serde_json::Value::Null })))
+            }
+        }
         Err(_) => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "not found" }))),
     }
 }
@@ -137,13 +150,18 @@ struct SendMessageRequest {
     version: Option<String>,
 }
 
-async fn send_message(State(state): State<AppState>, Json(req): Json<SendMessageRequest>, headers: HeaderMap) -> impl IntoResponse {
+async fn send_message(State(state): State<AppState>, Json(req): Json<SendMessageRequest>, headers: HeaderMap) -> (StatusCode, Json<Value>) {
     // auth
     let auth = &state.auth;
     let user = match auth.username_from_headers(&headers) {
         Ok(u) => u,
         Err(_) => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "unauthorized" }))),
     };
+
+    // basic validation
+    if req.ciphertext_b64.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "ciphertext missing" })));
+    }
 
     let db_guard = state.db.clone();
     let db = db_guard.lock().await;
@@ -153,7 +171,7 @@ async fn send_message(State(state): State<AppState>, Json(req): Json<SendMessage
     }
 }
 
-async fn inbox(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
+async fn inbox(State(state): State<AppState>, headers: HeaderMap) -> (StatusCode, Json<Value>) {
     let auth = &state.auth;
     let username = match auth.username_from_headers(&headers) {
         Ok(u) => u,
