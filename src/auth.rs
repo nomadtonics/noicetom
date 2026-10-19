@@ -7,11 +7,14 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::collections::HashMap;
 
+const CHALLENGE_TTL_SECS: i64 = 300;
+const TOKEN_TTL_SECS: i64 = 86400;
+
 type HmacSha256 = Hmac<Sha256>;
 
 pub struct AuthManager {
     secret: String,
-    challenges: Mutex<HashMap<String, Vec<u8>>>,
+    challenges: Mutex<HashMap<String, (Vec<u8>, i64)>>,
 }
 
 impl AuthManager {
@@ -23,20 +26,26 @@ impl AuthManager {
         let mut rng = rand::thread_rng();
         let mut buf = vec![0u8; 32];
         rng.fill_bytes(&mut buf);
+        let now = chrono::Utc::now().timestamp();
         let mut challenges = self.challenges.lock().await;
-        challenges.insert(username.to_string(), buf.clone());
+        challenges.insert(username.to_string(), (buf.clone(), now));
         buf
     }
 
     pub async fn verify_and_issue(&self, username: &str, signature_b64: &str, db: &tokio::sync::Mutex<crate::db::Db>) -> anyhow::Result<String> {
-        // get challenge
-        let challenges = self.challenges.lock().await;
-        let challenge = challenges.get(username).ok_or_else(|| anyhow::anyhow!("no challenge"))?.clone();
+        let now = chrono::Utc::now().timestamp();
+        let mut challenges = self.challenges.lock().await;
+        let challenge_pair = challenges.get(username).ok_or_else(|| anyhow::anyhow!("no challenge"))?.clone();
+        let challenge = challenge_pair.0;
+        let issued_at = challenge_pair.1;
+        if now.saturating_sub(issued_at) > CHALLENGE_TTL_SECS {
+            challenges.remove(username);
+            return Err(anyhow::anyhow!("challenge expired"));
+        }
         drop(challenges);
 
-        // get user public key from DB
         let db_guard = db.lock().await;
-        let pk_b64 = db_guard.get_public_key(username)?;
+        let pk_b64 = db_guard.get_signing_pub(username)?;
         drop(db_guard);
 
         let pk_bytes = general_purpose::STANDARD.decode(pk_b64)?;
@@ -47,7 +56,10 @@ impl AuthManager {
 
         pk.verify(&challenge, &sig)?;
 
-        // issue token: HMAC(username||timestamp)
+        let mut challenges = self.challenges.lock().await;
+        challenges.remove(username);
+        drop(challenges);
+
         let ts = chrono::Utc::now().timestamp();
         let mut mac = HmacSha256::new_from_slice(self.secret.as_bytes()).expect("HMAC can take key of any size");
         mac.update(username.as_bytes());
@@ -65,14 +77,18 @@ impl AuthManager {
 
     pub fn username_from_token(&self, token_b64: &str) -> anyhow::Result<String> {
         let token = general_purpose::STANDARD.decode(token_b64)?;
-        // token format: username:timestamp:tag
         let parts: Vec<&[u8]> = token.split(|b| *b == b':').collect();
         if parts.len() < 3 { return Err(anyhow::anyhow!("invalid token")); }
         let username = std::str::from_utf8(parts[0])?;
         let ts = std::str::from_utf8(parts[1])?;
         let tag = parts[2];
 
-        // recompute HMAC
+        let ts_num = ts.parse::<i64>()?;
+        let now = chrono::Utc::now().timestamp();
+        if now.saturating_sub(ts_num) > TOKEN_TTL_SECS {
+            return Err(anyhow::anyhow!("token expired"));
+        }
+
         let mut mac = HmacSha256::new_from_slice(self.secret.as_bytes()).expect("HMAC key");
         mac.update(username.as_bytes());
         mac.update(b":");
@@ -80,7 +96,6 @@ impl AuthManager {
         let expected = mac.finalize().into_bytes();
         if expected.as_slice() != tag { return Err(anyhow::anyhow!("invalid token")); }
 
-        // optional: check timestamp expiry (e.g., 24h)
         Ok(username.to_string())
     }
 
