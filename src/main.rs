@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     let server_secret = std::env::var("SERVER_SECRET").unwrap_or_else(|_| "dev-secret".into());
 
     let db = Db::open(&db_path)?;
-    db.init() ?;
+    db.init()?;
 
     let state = AppState {
         db: Arc::new(Mutex::new(db)),
@@ -65,13 +65,14 @@ async fn health() -> Json<serde_json::Value> {
 #[derive(Deserialize)]
 struct RegisterRequest {
     username: String,
-    public_key_b64: String,
+    signing_pub_b64: String,
+    enc_pub_b64: String,
 }
 
 async fn register(State(state): State<AppState>, Json(req): Json<RegisterRequest>) -> impl IntoResponse {
     let db = state.db.clone();
     let mut db = db.lock().await;
-    match db.insert_user(&req.username, &req.public_key_b64) {
+    match db.insert_user(&req.username, &req.signing_pub_b64, &req.enc_pub_b64) {
         Ok(_) => (StatusCode::CREATED, Json(serde_json::json!({ "ok": true }))),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "ok": false, "error": e.to_string() }))),
     }
@@ -103,8 +104,8 @@ async fn verify(State(state): State<AppState>, Json(req): Json<VerifyRequest>) -
 async fn get_key(State(state): State<AppState>, Path(username): Path<String>) -> impl IntoResponse {
     let db = state.db.clone();
     let mut db = db.lock().await;
-    match db.get_public_key(&username) {
-        Ok(pk) => (StatusCode::OK, Json(serde_json::json!({ "public_key_b64": pk }))),
+    match db.get_enc_pub(&username) {
+        Ok(pk) => (StatusCode::OK, Json(serde_json::json!({ "enc_pub_b64": pk }))),
         Err(_) => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "not found" }))),
     }
 }
